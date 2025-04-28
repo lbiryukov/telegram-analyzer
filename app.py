@@ -180,6 +180,45 @@ with tab2:
             max_value=current_date.date()
         )
     
+    # Initialize session state for storing stats and keywords
+    if 'message_stats' not in st.session_state:
+        st.session_state.message_stats = None
+    if 'keywords' not in st.session_state:
+        st.session_state.keywords = ''
+    
+    # Search query
+    search_query = st.text_area(
+        "Enter your search query",
+        help="Enter a question or topic to search for"
+    )
+    
+    # Add Get Keywords button right after search query
+    if st.button("Get Keywords"):
+        if not search_query:
+            st.error("Please enter a search query")
+        else:
+            try:
+                with st.spinner('Generating search keywords...'):
+                    # Generate keywords from the search query
+                    generated_keywords = generate_search_keywords(search_query)
+                    st.info(f"Generated keywords: {', '.join(generated_keywords)}")
+                    # Update the keywords in session state
+                    st.session_state.keywords = ', '.join(generated_keywords)
+            except Exception as e:
+                logger.error(f"Error generating keywords: {str(e)}")
+                st.error(f"Error: {str(e)}")
+    
+    # Keyword adjustment
+    keywords = st.text_area(
+        "Adjust search keywords (comma-separated)",
+        help="Modify the generated keywords or enter your own. Leave empty to use AI-generated keywords.",
+        value=st.session_state.keywords
+    )
+    
+    # Update session state when keywords are manually changed
+    if keywords != st.session_state.keywords:
+        st.session_state.keywords = keywords
+    
     # Context parameters
     col1, col2 = st.columns(2)
     with col1:
@@ -199,72 +238,87 @@ with tab2:
             help="Maximum depth of answer chains to follow"
         )
     
-    # User prompt input
-    user_prompt = st.text_area(
-        "Enter your question about the messages",
-        help="Example: What are the main topics discussed in the last week?",
-        height=100
-    )
+    # Add buttons in a row
+    col1, col2 = st.columns(2)
+    with col1:
+        get_stats_button = st.button("Get Message Stats", use_container_width=True)
+    with col2:
+        retrieve_messages_button = st.button("Retrieve Messages", use_container_width=True, disabled=not st.session_state.message_stats)
     
-    # Initialize session state for keywords if not exists
-    if 'keywords' not in st.session_state:
-        st.session_state.keywords = []
-    
-    # Generate keywords button
-    if st.button("Generate Keywords"):
-        if not user_prompt:
-            st.error("Please enter a question")
+    # Handle Get Message Stats button
+    if get_stats_button:
+        if not search_query:
+            st.error("Please enter a search query")
         else:
             try:
-                with st.spinner('Generating search keywords...'):
-                    # Generate keywords
-                    keywords = generate_search_keywords(user_prompt)
-                    st.session_state.keywords = keywords
-                    st.success("Generated keywords:")
-                    st.write(", ".join(keywords))
+                # Get keywords from either session state or text area
+                if st.session_state.get('keywords'):
+                    keywords_to_use = [k.strip() for k in st.session_state.keywords.split(',') if k.strip()]
+                else:
+                    keywords_to_use = [k.strip() for k in keywords.split(',') if k.strip()]
+                
+                if not keywords_to_use:
+                    st.error("Please generate or enter keywords first")
+                else:
+                    with st.spinner('Retrieving message statistics...'):
+                        # Get message stats using get_messages_with_keywords
+                        keyword_messages = message_retriever.get_messages_with_keywords(
+                            chat_id=selected_chat[0],
+                            keywords=keywords_to_use,
+                            start_date=datetime.combine(start_date, datetime.min.time()),
+                            end_date=datetime.combine(end_date, datetime.max.time())
+                        )
+                        
+                        # Calculate statistics
+                        stats = {
+                            'parameters': {
+                                'chat_id': selected_chat[0],
+                                'keywords': keywords_to_use,
+                                'date_range': f"{start_date} to {end_date}",
+                                'circ_count': circ_count,
+                                'answer_depth_limit': answer_depth
+                            },
+                            'keyword_messages': {
+                                'count': len(keyword_messages),
+                                'total_length': sum(len(msg['text']) for msg in keyword_messages),
+                                'by_keyword': {
+                                    keyword: {
+                                        'count': len([msg for msg in keyword_messages if keyword.lower() in msg['text'].lower()]),
+                                        'total_length': sum(len(msg['text']) for msg in keyword_messages if keyword.lower() in msg['text'].lower())
+                                    }
+                                    for keyword in keywords_to_use
+                                }
+                            }
+                        }
+                        
+                        # Store stats and keywords in session state
+                        st.session_state.message_stats = stats
+                        st.session_state.keywords_to_use = keywords_to_use
+                        
+                        # Display stats
+                        st.success("Message statistics retrieved successfully!")
+                        st.json(stats)
             except Exception as e:
-                logger.error(f"Error generating keywords: {str(e)}")
+                logger.error(f"Error retrieving message stats: {str(e)}")
                 st.error(f"Error: {str(e)}")
     
-    # Show keyword adjustment if we have keywords
-    if st.session_state.keywords:
-        # Add textbox for manual keyword adjustment
-        keywords_text = st.text_area(
-            "Adjust keywords (comma-separated)",
-            value=", ".join(st.session_state.keywords),
-            help="You can add, remove, or modify keywords. Separate them with commas.",
-            height=100
-        )
-        
-        # Parse keywords from text
-        adjusted_keywords = [k.strip() for k in keywords_text.split(",") if k.strip()]
-        
-        # Retrieve messages button
-        if st.button("Retrieve Messages"):
-            try:
-                # Retrieve messages with context
-                with st.spinner('Retrieving messages...'):
-                    result = message_retriever.get_messages_with_context(
-                        chat_id=selected_chat[0],
-                        keywords=adjusted_keywords,
-                        start_date=datetime.combine(start_date, datetime.min.time()),
-                        end_date=datetime.combine(end_date, datetime.max.time()),
-                        circ_count=circ_count,
-                        answer_depth_limit=answer_depth
-                    )
-                    
-                    # Display statistics
-                    st.subheader("Retrieval Statistics")
-                    stats = result['stats']
-                    st.json(stats)
-                    
-                    # Display messages
-                    st.subheader("Retrieved Messages")
-                    for msg in result['messages']:
-                        with st.expander(f"{msg['date']} - {msg['type']}"):
-                            st.write(f"**Sender:** {msg['sender']}")
-                            st.write(f"**Text:** {msg['text']}")
-                    
-            except Exception as e:
-                logger.error(f"Error during message retrieval: {str(e)}")
-                st.error(f"Error: {str(e)}") 
+    # Handle Retrieve Messages button
+    if retrieve_messages_button and st.session_state.message_stats:
+        try:
+            with st.spinner('Retrieving messages with context...'):
+                # Get messages with context using stored keywords
+                result = message_retriever.get_messages_with_context(
+                    chat_id=selected_chat[0],
+                    keywords=st.session_state.keywords_to_use,
+                    start_date=datetime.combine(start_date, datetime.min.time()),
+                    end_date=datetime.combine(end_date, datetime.max.time()),
+                    circ_count=circ_count,
+                    answer_depth_limit=answer_depth
+                )
+                
+                # Display messages
+                st.success("Messages retrieved successfully!")
+                st.json(result['messages'])
+        except Exception as e:
+            logger.error(f"Error retrieving messages: {str(e)}")
+            st.error(f"Error: {str(e)}") 
