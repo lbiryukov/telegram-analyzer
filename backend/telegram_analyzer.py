@@ -40,9 +40,9 @@ class TelegramMessage(Base):
     )
 
 class TelegramAnalyzer:
-    def __init__(self):
+    def __init__(self, db_path='telegram_messages.db'):
         logger.info("Initializing TelegramAnalyzer")
-        self.db_engine = create_engine('sqlite:///telegram_messages.db')
+        self.db_engine = create_engine(f'sqlite:///{db_path}')
         
         # Check if tables exist before creating them
         inspector = inspect(self.db_engine)
@@ -86,6 +86,7 @@ class TelegramAnalyzer:
             # Fetch messages with ID filtering
             messages = []
             message_count = 0
+            total_messages = 0
             
             # Fetch messages in chunks
             current_id = max_id
@@ -101,6 +102,7 @@ class TelegramAnalyzer:
                     break
                 
                 logger.info(f"Fetched chunk of {len(chunk)} messages")
+                total_messages += len(chunk)
                 
                 for message in chunk:
                     if not message.text:
@@ -119,7 +121,7 @@ class TelegramAnalyzer:
                 # Update current_id for next chunk
                 current_id = chunk[-1].id - 1
             
-            logger.info(f"Fetched {message_count} messages from {chat.title}")
+            logger.info(f"Fetched {message_count} messages from {chat.title} (total messages in range: {total_messages})")
             return messages
         except Exception as e:
             logger.error(f"Error fetching messages from {chat_url}: {str(e)}")

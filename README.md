@@ -1,68 +1,57 @@
-# Telegram Chat Analyzer
+# Telegram Message Analyzer
 
-A web application that allows users to analyze Telegram chat messages using AI-powered insights.
+A Python application to fetch and analyze messages from Telegram channels using the Telethon library and SQLite database.
 
 ## Features
 
-- Input multiple Telegram chat URLs
-- Ask questions about the chat content
-- AI-powered analysis using CrewAI
-- Local storage of chat messages
-- Vector-based search using ChromaDB
+- Fetch messages from multiple Telegram channels
+- Store messages in SQLite database
+- Efficient message fetching with date range filtering
+- Web interface using Streamlit
+- Message deduplication
+- Date range based message retrieval
 
 ## Setup
 
-1. Clone this repository
-2. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
+1. Install dependencies:
+```bash
+pip install -r requirements.txt
+```
 
-3. Create a `.env` file in the root directory with your API keys:
-   ```
-   TELEGRAM_API_ID=your_telegram_api_id
-   TELEGRAM_API_HASH=your_telegram_api_hash
-   OPENAI_API_KEY=your_openai_api_key
-   ```
+2. Create a `.env` file with your Telegram API credentials:
+```
+TELEGRAM_API_ID=your_api_id
+TELEGRAM_API_HASH=your_api_hash
+TELEGRAM_SESSION=your_session_string
+```
 
-4. Run the application:
-   ```bash
-   streamlit run app.py
-   ```
+3. Run the application:
+```bash
+streamlit run app.py
+```
 
 ## Usage
 
-1. Enter Telegram chat URLs (one per line)
-2. Enter your question about the chats
-3. Click "Analyze" to process
-4. View the results in the output window
+1. Enter one or more Telegram channel URLs (e.g., https://t.me/channel_name)
+2. Specify how many days of messages to fetch
+3. Click "Fetch Messages" to start the process
 
-## Architecture
+The application will:
+- Check for existing messages in the database
+- Only fetch messages from date ranges that aren't already stored
+- Show statistics about fetched messages
 
-The application consists of:
+## Files
 
-- **Frontend**: Streamlit-based web interface
-- **Backend**: 
-  - Telegram message fetcher
-  - SQLite database for message storage
-  - ChromaDB for vector-based search
-  - CrewAI for AI-powered analysis
-
-## Future Enhancements
-
-- User authentication
-- Payment system integration
-- Advanced filtering options
-- Chat visualization
-- Export capabilities
+- `app.py`: Streamlit web interface
+- `backend/telegram_analyzer.py`: Main message fetching and database logic
+- `recreate_db.py`: Utility to recreate the database
+- `test_db.py`: Database testing and inspection tool
 
 ## Requirements
 
-- Python 3.8+
-- Telegram API credentials
-- OpenAI API key
-- Internet connection
-
-## License
-
-MIT License 
+- Python 3.7+
+- Telethon
+- SQLAlchemy
+- Streamlit
+- python-dotenv 
