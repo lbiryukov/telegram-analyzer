@@ -1,0 +1,10 @@
+streamlit
+telethon
+crewai
+langchain
+python-dotenv
+sqlalchemy
+chromadb
+openai
+nest_asyncio
+pydantic 
