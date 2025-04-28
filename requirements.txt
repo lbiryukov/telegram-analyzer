@@ -1,10 +1,11 @@
-streamlit
-telethon
+streamlit==1.32.0
+telethon==1.34.0
 crewai
 langchain
-python-dotenv
-sqlalchemy
+python-dotenv==1.0.1
+sqlalchemy==2.0.27
 chromadb
 openai
 nest_asyncio
-pydantic 
+pydantic
+requests==2.31.0 
