@@ -21,6 +21,103 @@ class MessageRetriever:
         self.engine = create_engine(f'sqlite:///{db_path}')
         self.Session = sessionmaker(bind=self.engine)
     
+    def optimize_keywords_for_length(
+        self,
+        chat_id: str,
+        keywords: List[str],
+        start_date: datetime,
+        end_date: datetime,
+        max_length: int = 10000,
+        existing_stats: Optional[Dict[str, Any]] = None
+    ) -> List[str]:
+        """
+        Optimize the keyword set to produce messages within the specified character limit.
+        Uses existing message statistics if provided to avoid additional database queries.
+        
+        Args:
+            chat_id: ID of the chat to search in
+            keywords: List of keywords sorted by relevance
+            start_date: Start date for the search
+            end_date: End date for the search
+            max_length: Maximum total length of messages to retrieve
+            existing_stats: Optional dictionary containing existing message statistics
+            
+        Returns:
+            Optimized list of keywords that will produce messages within the length limit
+        """
+        try:
+            # Start with all keywords
+            current_keywords = keywords.copy()
+            
+            if existing_stats and 'keyword_messages' in existing_stats:
+                # Use existing statistics
+                total_length = existing_stats['keyword_messages']['total_length']
+                keyword_stats = existing_stats['keyword_messages']['by_keyword']
+                
+                # Remove keywords from the end until we're under the limit
+                while total_length > max_length and len(current_keywords) > 1:
+                    # Remove the last keyword
+                    removed_keyword = current_keywords.pop()
+                    
+                    # Update total length using existing statistics
+                    if removed_keyword in keyword_stats:
+                        total_length -= keyword_stats[removed_keyword]['total_length']
+                    
+                    logger.info(f"Removed keyword '{removed_keyword}', new total length: {total_length}")
+            else:
+                # Fallback to database query if no existing stats
+                session = self.Session()
+                try:
+                    total_length = 0
+                    
+                    # Get initial message length
+                    keyword_conditions = [MessageSearch.content.ilike(f'%{k}%') for k in current_keywords]
+                    messages = session.query(TelegramMessage).join(
+                        MessageSearch,
+                        TelegramMessage.id == MessageSearch.message_id
+                    ).filter(
+                        and_(
+                            TelegramMessage.chat_id == chat_id,
+                            TelegramMessage.date >= start_date,
+                            TelegramMessage.date <= end_date,
+                            or_(*keyword_conditions)
+                        )
+                    ).all()
+                    
+                    total_length = sum(len(msg.text) for msg in messages)
+                    
+                    # Remove keywords from the end until we're under the limit
+                    while total_length > max_length and len(current_keywords) > 1:
+                        # Remove the last keyword
+                        removed_keyword = current_keywords.pop()
+                        
+                        # Recalculate total length with remaining keywords
+                        keyword_conditions = [MessageSearch.content.ilike(f'%{k}%') for k in current_keywords]
+                        messages = session.query(TelegramMessage).join(
+                            MessageSearch,
+                            TelegramMessage.id == MessageSearch.message_id
+                        ).filter(
+                            and_(
+                                TelegramMessage.chat_id == chat_id,
+                                TelegramMessage.date >= start_date,
+                                TelegramMessage.date <= end_date,
+                                or_(*keyword_conditions)
+                            )
+                        ).all()
+                        
+                        total_length = sum(len(msg.text) for msg in messages)
+                        
+                        logger.info(f"Removed keyword '{removed_keyword}', new total length: {total_length}")
+                finally:
+                    session.close()
+            
+            logger.info(f"Optimized keywords: {current_keywords}, total length: {total_length}")
+            return current_keywords
+            
+        except Exception as e:
+            logger.error(f"Error optimizing keywords: {str(e)}")
+            return keywords  # Return original keywords if optimization fails
+    
     def get_messages_with_context(
         self,
         chat_id: str,
@@ -28,7 +125,8 @@ class MessageRetriever:
         start_date: datetime,
         end_date: datetime,
         circ_count: int = 2,
-        answer_depth_limit: int = 2
+        answer_depth_limit: int = 2,
+        max_length: int = 10000
     ) -> Dict[str, Any]:
         """
         Retrieve messages with context based on keywords.
@@ -40,6 +138,7 @@ class MessageRetriever:
             end_date: End date for the search
             circ_count: Number of messages to retrieve before and after keyword messages
             answer_depth_limit: Maximum depth of answer chains to follow
+            max_length: Maximum total length of messages to retrieve
             
         Returns:
             Dictionary containing:
@@ -49,11 +148,20 @@ class MessageRetriever:
             - answer chain stats
             - all retrieved messages
         """
+        # Optimize keywords for length limit
+        optimized_keywords = self.optimize_keywords_for_length(
+            chat_id=chat_id,
+            keywords=keywords,
+            start_date=start_date,
+            end_date=end_date,
+            max_length=max_length
+        )
+        
         session = self.Session()
         try:
-            # Prepare search conditions
+            # Prepare search conditions with optimized keywords
             keyword_conditions = []
-            for keyword in keywords:
+            for keyword in optimized_keywords:
                 keyword_conditions.append(MessageSearch.content.ilike(f'%{keyword}%'))
             
             # Get messages containing keywords using the search index
@@ -103,7 +211,7 @@ class MessageRetriever:
             stats = {
                 'parameters': {
                     'chat_id': chat_id,
-                    'keywords': keywords,
+                    'keywords': optimized_keywords,
                     'date_range': f"{start_date} to {end_date}",
                     'circ_count': circ_count,
                     'answer_depth_limit': answer_depth_limit
@@ -116,7 +224,7 @@ class MessageRetriever:
                             'count': len([msg for msg in keyword_messages if keyword.lower() in msg.text.lower()]),
                             'total_length': sum(len(msg.text) for msg in keyword_messages if keyword.lower() in msg.text.lower())
                         }
-                        for keyword in keywords
+                        for keyword in optimized_keywords
                     }
                 },
                 'context_messages': {

@@ -185,6 +185,10 @@ with tab2:
         st.session_state.message_stats = None
     if 'keywords' not in st.session_state:
         st.session_state.keywords = ''
+    if 'optimized_keywords' not in st.session_state:
+        st.session_state.optimized_keywords = None
+    if 'show_stats' not in st.session_state:
+        st.session_state.show_stats = False
     
     # Search query
     search_query = st.text_area(
@@ -204,6 +208,8 @@ with tab2:
                     st.info(f"Generated keywords: {', '.join(generated_keywords)}")
                     # Update the keywords in session state
                     st.session_state.keywords = ', '.join(generated_keywords)
+                    # Reset optimized keywords
+                    st.session_state.optimized_keywords = None
             except Exception as e:
                 logger.error(f"Error generating keywords: {str(e)}")
                 st.error(f"Error: {str(e)}")
@@ -218,6 +224,7 @@ with tab2:
     # Update session state when keywords are manually changed
     if keywords != st.session_state.keywords:
         st.session_state.keywords = keywords
+        st.session_state.optimized_keywords = None
     
     # Context parameters
     col1, col2 = st.columns(2)
@@ -239,11 +246,13 @@ with tab2:
         )
     
     # Add buttons in a row
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
     with col1:
         get_stats_button = st.button("Get Message Stats", use_container_width=True)
     with col2:
-        retrieve_messages_button = st.button("Retrieve Messages", use_container_width=True, disabled=not st.session_state.message_stats)
+        optimize_button = st.button("Optimize Keywords", use_container_width=True, disabled=not st.session_state.message_stats)
+    with col3:
+        retrieve_messages_button = st.button("Retrieve Messages", use_container_width=True, disabled=not st.session_state.optimized_keywords)
     
     # Handle Get Message Stats button
     if get_stats_button:
@@ -291,25 +300,60 @@ with tab2:
                             }
                         }
                         
-                        # Store stats and keywords in session state
+                        # Store stats in session state
                         st.session_state.message_stats = stats
-                        st.session_state.keywords_to_use = keywords_to_use
+                        st.session_state.show_stats = True
                         
                         # Display stats
                         st.success("Message statistics retrieved successfully!")
                         st.json(stats)
+                        
+                        # Force a rerun to update the button state
+                        st.experimental_rerun()
             except Exception as e:
                 logger.error(f"Error retrieving message stats: {str(e)}")
                 st.error(f"Error: {str(e)}")
     
+    # Show stats if available
+    if st.session_state.show_stats and st.session_state.message_stats:
+        st.json(st.session_state.message_stats)
+    
+    # Handle Optimize Keywords button
+    if optimize_button and st.session_state.message_stats:
+        try:
+            with st.spinner('Optimizing keywords for 10k character limit...'):
+                # Get current keywords
+                current_keywords = [k.strip() for k in st.session_state.keywords.split(',') if k.strip()]
+                
+                # Optimize keywords using existing message statistics
+                optimized_keywords = message_retriever.optimize_keywords_for_length(
+                    chat_id=selected_chat[0],
+                    keywords=current_keywords,
+                    start_date=datetime.combine(start_date, datetime.min.time()),
+                    end_date=datetime.combine(end_date, datetime.max.time()),
+                    existing_stats=st.session_state.message_stats
+                )
+                
+                # Update session state and text area
+                st.session_state.optimized_keywords = optimized_keywords
+                st.session_state.keywords = ', '.join(optimized_keywords)
+                
+                st.success(f"Keywords optimized. New keyword set: {', '.join(optimized_keywords)}")
+                
+                # Force a rerun to update the UI
+                st.experimental_rerun()
+        except Exception as e:
+            logger.error(f"Error optimizing keywords: {str(e)}")
+            st.error(f"Error: {str(e)}")
+    
     # Handle Retrieve Messages button
-    if retrieve_messages_button and st.session_state.message_stats:
+    if retrieve_messages_button and st.session_state.optimized_keywords:
         try:
             with st.spinner('Retrieving messages with context...'):
-                # Get messages with context using stored keywords
+                # Get messages with context using optimized keywords
                 result = message_retriever.get_messages_with_context(
                     chat_id=selected_chat[0],
-                    keywords=st.session_state.keywords_to_use,
+                    keywords=st.session_state.optimized_keywords,
                     start_date=datetime.combine(start_date, datetime.min.time()),
                     end_date=datetime.combine(end_date, datetime.max.time()),
                     circ_count=circ_count,

@@ -3,6 +3,19 @@ import logging
 import requests
 from typing import List
 import re
+import nltk
+from nltk.corpus import stopwords
+from nltk.tokenize import word_tokenize
+
+# Download required NLTK data
+try:
+    nltk.data.find('tokenizers/punkt')
+except LookupError:
+    nltk.download('punkt')
+try:
+    nltk.data.find('corpora/stopwords')
+except LookupError:
+    nltk.download('stopwords')
 
 # Configure logging
 logging.basicConfig(
@@ -14,6 +27,53 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger('AIUtils')
+
+def filter_stopwords(keywords: List[str]) -> List[str]:
+    """
+    Filter out Russian stopwords from the list of keywords.
+    Also removes very short words (less than 3 characters) and common punctuation.
+    """
+    try:
+        # Get Russian stopwords
+        russian_stopwords = set(stopwords.words('russian'))
+        
+        # Additional common Russian words to filter out
+        additional_stopwords = {
+            'это', 'вот', 'так', 'там', 'тут', 'здесь', 'там', 'туда', 'сюда',
+            'когда', 'где', 'как', 'что', 'кто', 'который', 'который', 'который',
+            'который', 'который', 'который', 'который', 'который', 'который'
+        }
+        
+        # Combine all stopwords
+        all_stopwords = russian_stopwords.union(additional_stopwords)
+        
+        filtered_keywords = []
+        for keyword in keywords:
+            # Tokenize the keyword
+            tokens = word_tokenize(keyword.lower())
+            
+            # Filter out stopwords and short words
+            filtered_tokens = [
+                token for token in tokens
+                if token not in all_stopwords
+                and len(token) >= 3
+                and not token.isdigit()
+                and not all(c in '.,!?;:()[]{}' for c in token)
+            ]
+            
+            # If the keyword is a phrase, keep it if it contains at least one non-stopword
+            if len(tokens) > 1 and filtered_tokens:
+                filtered_keywords.append(keyword)
+            # If it's a single word, keep it if it's not a stopword
+            elif len(tokens) == 1 and filtered_tokens:
+                filtered_keywords.append(keyword)
+        
+        logger.info(f"Filtered keywords: {filtered_keywords}")
+        return filtered_keywords
+        
+    except Exception as e:
+        logger.error(f"Error filtering stopwords: {str(e)}")
+        return keywords  # Return original keywords if filtering fails
 
 def generate_search_keywords(prompt: str) -> List[str]:
     """
@@ -81,8 +141,11 @@ def generate_search_keywords(prompt: str) -> List[str]:
         seen = set()
         unique_keywords = [k for k in keywords if not (k in seen or seen.add(k))]
         
-        logger.info(f"Generated keywords for prompt '{prompt}': {unique_keywords}")
-        return unique_keywords
+        # Filter out stopwords
+        filtered_keywords = filter_stopwords(unique_keywords)
+        
+        logger.info(f"Generated and filtered keywords for prompt '{prompt}': {filtered_keywords}")
+        return filtered_keywords
         
     except Exception as e:
         logger.error(f"Error generating search keywords: {str(e)}")
