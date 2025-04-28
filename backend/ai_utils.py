@@ -1,7 +1,7 @@
 import os
 import logging
 import requests
-from typing import List
+from typing import List, Dict, Any, Optional
 import re
 import nltk
 from nltk.corpus import stopwords
@@ -103,11 +103,12 @@ def generate_search_keywords(prompt: str) -> List[str]:
         5. Include different forms of the same word (e.g., for Russian words, include different cases and forms)
         6. Include common variations and synonyms
         7. Include both full phrases and individual important words
+        8. Include transliterations (Deniz --> Дениц, Дениз)
+        9. Sort the keywords by relevance to the question
         
         For example, if the question is about "круассаны", include:
         - круассаны, круассанов, круассанами, круассан
         - пекарня, пекарни, пекарню
-        - купить, куплю, купил, купила
         - вкусные, вкусный, вкусная
         
         Return only the keywords, separated by commas."""
@@ -150,3 +151,82 @@ def generate_search_keywords(prompt: str) -> List[str]:
     except Exception as e:
         logger.error(f"Error generating search keywords: {str(e)}")
         raise 
+
+def get_ai_response(context: str, query: str) -> Dict[str, Any]:
+    """
+    Get a response from the DeepSeek API based on the provided context and query.
+    
+    Args:
+        context: Formatted context string from AIContextBuilder
+        query: Original user query
+        
+    Returns:
+        Dictionary containing:
+        - response: The AI's response text
+        - error: Error message if any
+    """
+    try:
+        # Get API key from environment
+        api_key = os.getenv('DEEPSEEK_API_KEY')
+        if not api_key:
+            raise ValueError("DEEPSEEK_API_KEY environment variable is not set")
+        
+        # Prepare the API request
+        url = "https://api.deepseek.com/v1/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+        
+        # Construct the prompt
+        prompt = f'''You are a helpful and knowledgeable AI assistant.
+
+Context:
+{context}
+
+User's Question:
+{query}
+
+Based only on the context above, generate the most accurate, complete, and well-structured answer to the user's question.
+
+If necessary, explain your reasoning clearly and concisely.
+
+If the context does not provide enough information to answer fully, say so explicitly and suggest what might be missing.'''
+        
+        # Prepare the messages for the API
+        messages = [
+            {"role": "system", "content": "You are a helpful and knowledgeable AI assistant."},
+            {"role": "user", "content": prompt}
+        ]
+        
+        # Make the API request
+        response = requests.post(
+            url,
+            headers=headers,
+            json={
+                "model": "deepseek-chat",
+                "messages": messages,
+                "temperature": 0.7,
+                "max_tokens": 1000  # Adjust based on expected response length
+            }
+        )
+        
+        # Check if the request was successful
+        response.raise_for_status()
+        
+        # Extract the response text
+        ai_response = response.json()['choices'][0]['message']['content']
+        
+        logger.info("Successfully received response from DeepSeek API")
+        return {
+            'response': ai_response,
+            'error': None
+        }
+        
+    except Exception as e:
+        error_msg = f"Error getting AI response: {str(e)}"
+        logger.error(error_msg)
+        return {
+            'response': None,
+            'error': error_msg
+        } 

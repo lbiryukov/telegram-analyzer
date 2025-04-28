@@ -1,7 +1,8 @@
 import streamlit as st
 from backend.telegram_analyzer import TelegramAnalyzer, TelegramMessage
-from backend.ai_utils import generate_search_keywords
+from backend.ai_utils import generate_search_keywords, get_ai_response
 from backend.message_retriever import MessageRetriever
+from backend.ai_context_builder import AIContextBuilder
 import os
 from dotenv import load_dotenv
 import logging
@@ -27,6 +28,7 @@ logger.info("Environment variables loaded")
 # Initialize analyzers
 telegram_analyzer = TelegramAnalyzer()
 message_retriever = MessageRetriever()
+ai_context_builder = AIContextBuilder()
 logger.info("Initializing analyzers")
 
 st.title("Telegram Message Analyzer")
@@ -233,15 +235,15 @@ with tab2:
             "Number of context messages",
             min_value=0,
             max_value=10,
-            value=2,
+            value=0,
             help="Number of messages to retrieve before and after keyword messages"
         )
     with col2:
         answer_depth = st.number_input(
             "Answer chain depth",
             min_value=0,
-            max_value=5,
-            value=2,
+            max_value=10,
+            value=10,
             help="Maximum depth of answer chains to follow"
         )
     
@@ -360,9 +362,66 @@ with tab2:
                     answer_depth_limit=answer_depth
                 )
                 
+                # Store messages in session state for context creation
+                st.session_state.retrieved_messages = result['messages']
+                
                 # Display messages
                 st.success("Messages retrieved successfully!")
                 st.json(result['messages'])
         except Exception as e:
             logger.error(f"Error retrieving messages: {str(e)}")
-            st.error(f"Error: {str(e)}") 
+            st.error(f"Error: {str(e)}")
+    
+    # Add Create Context button and handle context creation
+    if 'retrieved_messages' in st.session_state and st.session_state.retrieved_messages:
+        if st.button("Create Context", use_container_width=True):
+            try:
+                with st.spinner('Creating context for AI...'):
+                    # Generate context using AIContextBuilder
+                    context = ai_context_builder.get_context_for_ai(
+                        messages=st.session_state.retrieved_messages,
+                        query=search_query
+                    )
+                    
+                    # Store context in session state
+                    st.session_state.ai_context = context
+                    
+                    st.success("Context created successfully!")
+            except Exception as e:
+                logger.error(f"Error creating context: {str(e)}")
+                st.error(f"Error: {str(e)}")
+    
+    # Display context if available
+    if 'ai_context' in st.session_state and st.session_state.ai_context:
+        st.subheader("Context for AI")
+        st.text_area(
+            "Formatted Context",
+            value=st.session_state.ai_context,
+            height=400,
+            disabled=True
+        )
+        
+        # Add Get AI Response button
+        if st.button("Get AI Response", use_container_width=True):
+            try:
+                with st.spinner('Getting AI response...'):
+                    # Get response from AI
+                    result = get_ai_response(
+                        context=st.session_state.ai_context,
+                        query=search_query
+                    )
+                    
+                    if result['error']:
+                        st.error(result['error'])
+                    else:
+                        # Store response in session state
+                        st.session_state.ai_response = result['response']
+                        st.success("AI response received!")
+            except Exception as e:
+                logger.error(f"Error getting AI response: {str(e)}")
+                st.error(f"Error: {str(e)}")
+    
+    # Display AI response if available
+    if 'ai_response' in st.session_state and st.session_state.ai_response:
+        st.subheader("AI Response")
+        st.markdown(st.session_state.ai_response) 

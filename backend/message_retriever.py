@@ -32,11 +32,11 @@ class MessageRetriever:
     ) -> List[str]:
         """
         Optimize the keyword set to produce messages within the specified character limit.
-        Uses existing message statistics if provided to avoid additional database queries.
+        Removes keywords from the end of the list until the total length is under the limit.
         
         Args:
             chat_id: ID of the chat to search in
-            keywords: List of keywords sorted by relevance
+            keywords: List of keywords sorted by relevance (most relevant first)
             start_date: Start date for the search
             end_date: End date for the search
             max_length: Maximum total length of messages to retrieve
@@ -64,6 +64,9 @@ class MessageRetriever:
                         total_length -= keyword_stats[removed_keyword]['total_length']
                     
                     logger.info(f"Removed keyword '{removed_keyword}', new total length: {total_length}")
+                
+                logger.info(f"Optimized keywords: {current_keywords}, total length: {total_length}")
+                return current_keywords
             else:
                 # Fallback to database query if no existing stats
                 session = self.Session()
@@ -108,11 +111,11 @@ class MessageRetriever:
                         total_length = sum(len(msg.text) for msg in messages)
                         
                         logger.info(f"Removed keyword '{removed_keyword}', new total length: {total_length}")
+                    
+                    logger.info(f"Optimized keywords: {current_keywords}, total length: {total_length}")
+                    return current_keywords
                 finally:
                     session.close()
-            
-            logger.info(f"Optimized keywords: {current_keywords}, total length: {total_length}")
-            return current_keywords
             
         except Exception as e:
             logger.error(f"Error optimizing keywords: {str(e)}")
@@ -148,20 +151,11 @@ class MessageRetriever:
             - answer chain stats
             - all retrieved messages
         """
-        # Optimize keywords for length limit
-        optimized_keywords = self.optimize_keywords_for_length(
-            chat_id=chat_id,
-            keywords=keywords,
-            start_date=start_date,
-            end_date=end_date,
-            max_length=max_length
-        )
-        
         session = self.Session()
         try:
-            # Prepare search conditions with optimized keywords
+            # Prepare search conditions with keywords
             keyword_conditions = []
-            for keyword in optimized_keywords:
+            for keyword in keywords:
                 keyword_conditions.append(MessageSearch.content.ilike(f'%{keyword}%'))
             
             # Get messages containing keywords using the search index
@@ -211,7 +205,7 @@ class MessageRetriever:
             stats = {
                 'parameters': {
                     'chat_id': chat_id,
-                    'keywords': optimized_keywords,
+                    'keywords': keywords,  # Use original keywords
                     'date_range': f"{start_date} to {end_date}",
                     'circ_count': circ_count,
                     'answer_depth_limit': answer_depth_limit
@@ -224,7 +218,7 @@ class MessageRetriever:
                             'count': len([msg for msg in keyword_messages if keyword.lower() in msg.text.lower()]),
                             'total_length': sum(len(msg.text) for msg in keyword_messages if keyword.lower() in msg.text.lower())
                         }
-                        for keyword in optimized_keywords
+                        for keyword in keywords  # Use original keywords
                     }
                 },
                 'context_messages': {
